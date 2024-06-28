@@ -1,10 +1,11 @@
 use crate::renderers::{ScalingMatrix, ScalingRenderer};
 use crate::{Error, Pixels, PixelsContext, SurfaceSize, SurfaceTexture, TextureError};
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use wgpu::SurfaceTargetUnsafe;
 
 /// A builder to help create customized pixel buffers.
-pub struct PixelsBuilder<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle> {
-    request_adapter_options: Option<wgpu::RequestAdapterOptions<'req>>,
+pub struct PixelsBuilder<'req, 'dev, 'win, W: HasWindowHandle + HasDisplayHandle> {
+    request_adapter_options: Option<wgpu::RequestAdapterOptions<'req, 'static>>,
     device_descriptor: Option<wgpu::DeviceDescriptor<'dev>>,
     backend: wgpu::Backends,
     width: u32,
@@ -19,7 +20,7 @@ pub struct PixelsBuilder<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplay
     blend_state: wgpu::BlendState,
 }
 
-impl<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle>
+impl<'req, 'dev, 'win, W: HasWindowHandle + HasDisplayHandle>
     PixelsBuilder<'req, 'dev, 'win, W>
 {
     /// Create a builder that can be finalized into a [`Pixels`] pixel buffer.
@@ -70,7 +71,7 @@ impl<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle>
     /// Add options for requesting a [`wgpu::Adapter`].
     pub fn request_adapter_options(
         mut self,
-        request_adapter_options: wgpu::RequestAdapterOptions<'req>,
+        request_adapter_options: wgpu::RequestAdapterOptions<'req, 'static>,
     ) -> Self {
         self.request_adapter_options = Some(request_adapter_options);
         self
@@ -250,7 +251,11 @@ impl<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle>
         });
 
         // TODO: Use `options.pixel_aspect_ratio` to stretch the scaled texture
-        let surface = unsafe { instance.create_surface(self.surface_texture.window) }?;
+        let surface = unsafe {
+            instance.create_surface_unsafe(
+                SurfaceTargetUnsafe::from_window(self.surface_texture.window).unwrap(),
+            )
+        }?;
         let compatible_surface = Some(&surface);
         let request_adapter_options = &self.request_adapter_options;
         let adapter = match wgpu::util::initialize_adapter_from_env(&instance, compatible_surface) {
@@ -279,7 +284,7 @@ impl<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle>
         let device_descriptor = self
             .device_descriptor
             .unwrap_or_else(|| wgpu::DeviceDescriptor {
-                limits: adapter.limits(),
+                required_limits: adapter.limits(),
                 ..wgpu::DeviceDescriptor::default()
             });
 
@@ -516,7 +521,8 @@ const fn texture_format_size(texture_format: wgpu::TextureFormat) -> f32 {
         | Rg8Uint
         | Rg8Sint
         | Rgb9e5Ufloat
-        | Depth16Unorm => 2.0, // 16.0 / 8.0
+        | Depth16Unorm
+        | NV12 => 2.0, // 16.0 / 8.0
 
         // 32-bit formats, 8 bits per component
         R32Uint
@@ -536,6 +542,7 @@ const fn texture_format_size(texture_format: wgpu::TextureFormat) -> f32 {
         | Bgra8UnormSrgb
         | Rgb10a2Unorm
         | Rg11b10Float
+        | Rgb10a2Uint
         | Depth32Float
         | Depth24Plus
         | Depth24PlusStencil8 => 4.0, // 32.0 / 8.0
